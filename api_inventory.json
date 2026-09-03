@@ -1,0 +1,45 @@
+{
+  "upstream": {
+    "url": "https://github.com/ccsb-scripps/AutoDock-Vina.git",
+    "commit": "3c65c0b3e6c2c1d183f6a175ecb65e3c5ba91645",
+    "python_module": "vina.Vina",
+    "inventory_source": [
+      "upstream/build/python/vina/vina.py",
+      "upstream/build/python/vina/__init__.py",
+      "upstream/docs/source/docking_python.rst"
+    ]
+  },
+  "sidecar_api": {
+    "vina_ad.score_coordinates": {
+      "status": "implemented",
+      "primal": "scalar pair-distance score for finite real coordinates of shape (N,3)",
+      "differentiable_inputs": ["coordinates", "weights"],
+      "interfaces": ["jvp", "vjp", "grad", "value_and_grad"],
+      "oracle": "tests/test_score.py::test_analytic_oracle_and_finite_difference"
+    },
+    "vina_ad.score": {"status": "implemented_alias", "alias_of": "vina_ad.score_coordinates"},
+    "vina_ad.energy": {"status": "implemented_alias", "alias_of": "vina_ad.score_coordinates"}
+  },
+  "upstream_public_api": [
+    {"name": "vina.Vina.__init__", "status": "not_ad_suitable", "reason": "stateful configuration and compiled extension"},
+    {"name": "vina.Vina.__str__", "status": "not_ad_suitable", "reason": "text formatting"},
+    {"name": "vina.Vina.cite", "status": "not_ad_suitable", "reason": "text output"},
+    {"name": "vina.Vina.info", "status": "not_ad_suitable", "reason": "state snapshot/dictionary"},
+    {"name": "vina.Vina.set_receptor", "status": "not_ad_suitable", "reason": "file I/O and discrete molecular parsing"},
+    {"name": "vina.Vina.set_ligand_from_file", "status": "not_ad_suitable", "reason": "file I/O and parsing"},
+    {"name": "vina.Vina.set_ligand_from_string", "status": "not_ad_suitable", "reason": "text parsing"},
+    {"name": "vina.Vina.set_weights", "status": "deferred", "reason": "requires compiled scorer; covered by continuous replay weights"},
+    {"name": "vina.Vina.compute_vina_maps", "status": "deferred", "reason": "compiled map generation and discrete voxel dimensions"},
+    {"name": "vina.Vina.load_maps", "status": "not_ad_suitable", "reason": "file I/O"},
+    {"name": "vina.Vina.write_maps", "status": "not_ad_suitable", "reason": "file I/O"},
+    {"name": "vina.Vina.write_pose", "status": "not_ad_suitable", "reason": "file I/O and serialization"},
+    {"name": "vina.Vina.write_poses", "status": "not_ad_suitable", "reason": "file I/O, sorting, serialization"},
+    {"name": "vina.Vina.poses", "status": "deferred", "reason": "compiled search state and discrete pose selection"},
+    {"name": "vina.Vina.energies", "status": "deferred", "reason": "compiled search state and rounded output"},
+    {"name": "vina.Vina.randomize", "status": "not_ad_suitable", "reason": "random/discrete conformation operation"},
+    {"name": "vina.Vina.score", "status": "deferred", "reason": "compiled extension unavailable; continuous replay is sidecar API"},
+    {"name": "vina.Vina.optimize", "status": "deferred", "reason": "iterative optimizer with branch/termination state"},
+    {"name": "vina.Vina.dock", "status": "not_ad_suitable", "reason": "stochastic global search and discrete pose ranking"}
+  ],
+  "coverage_totals": {"upstream_public_entries": 19, "implemented_sidecar_callables": 1, "implemented_aliases": 2, "deferred": 6, "not_ad_suitable": 13}
+}

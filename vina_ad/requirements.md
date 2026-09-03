@@ -1,0 +1,17 @@
+# vina-ad requirements and provenance
+
+- Official source URL: `https://github.com/ccsb-scripps/AutoDock-Vina.git`
+- Fixed upstream commit: `3c65c0b3e6c2c1d183f6a175ecb65e3c5ba91645`
+- Snapshot imported at: `2026-09-04T00:00:00Z` (UTC; repository task run)
+- The source was cloned from the official URL, copied into `upstream/`, and its
+  clone-local `.git` directory was removed before the import commit. No
+  upstream source file is modified by this sidecar.
+- AD protocol: `chainrules==0.1.0` (the documented JVP/VJP/grad/value_and_grad
+  protocol). `numpy` is optional; pure Python sequences are supported.
+- Supported runtime: CPython 3.10-3.12, Linux/macOS/Windows, IEEE-754 real
+  floating point. The compiled upstream `vina_wrapper` is not required for the
+  sidecar workflow.
+- Evidence bindings: implementation `vina_ad/core.py`; public exports
+  `vina_ad/__init__.py`; workflow `vina_ad/workflow.py`; tests `tests/`;
+  command totals and environment are in
+  `/root/ad_xjtan_v4pro/tasks/task-1/artifacts/fix_receipt_round1.json`.
