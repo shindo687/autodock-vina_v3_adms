@@ -21,7 +21,6 @@ def _metadata() -> str:
         f"Version: {VERSION}\n"
         "Summary: ChainRules-compatible differentiable coordinate scoring sidecar for AutoDock Vina\n"
         "Requires-Python: >=3.10\n"
-        "Requires-Dist: chainrules==0.1.0\n"
         "License: Apache-2.0\n"
     )
 

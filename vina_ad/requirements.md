@@ -6,8 +6,11 @@
 - The source was cloned from the official URL, copied into `upstream/`, and its
   clone-local `.git` directory was removed before the import commit. No
   upstream source file is modified by this sidecar.
-- AD protocol: `chainrules==0.1.0` (the documented JVP/VJP/grad/value_and_grad
-  protocol). `numpy` is optional; pure Python sequences are supported.
+- AD protocol: tested with `chainrules==0.1.0` (the documented
+  JVP/VJP/grad/value_and_grad protocol). ChainRules is optional at install time:
+  when absent, the sidecar's small protocol-compatible fallback keeps the
+  public API usable; when present, the real ChainRules registry is used.
+  `numpy` is optional; pure Python sequences are supported.
 - Supported runtime: CPython 3.10-3.12, Linux/macOS/Windows, IEEE-754 real
   floating point. The compiled upstream `vina_wrapper` is not required for the
   sidecar workflow.

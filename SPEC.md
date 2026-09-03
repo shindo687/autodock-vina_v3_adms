@@ -7,9 +7,9 @@
   `upstream/` in commit `ac64216`.
 - Sidecar: `vina-ad` 0.1.0, Python 3.10+, tested on CPython 3.12.13.
 - AD protocol: ChainRules 0.1.0 (`chainrules` package); runtime has no JAX or
-  PyTorch dependency. `vina_ad` has a small fallback protocol for import-only
-  use when ChainRules is not installed; normal installation declares the
-  ChainRules dependency.
+  PyTorch dependency. ChainRules is used when installed, while a small
+  protocol-compatible fallback keeps installation self-contained when the
+  internal ChainRules package is unavailable.
 - Import time and removal of the cloned upstream `.git` directory are recorded
   in `vina_ad/requirements.md`.
 

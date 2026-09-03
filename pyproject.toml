@@ -9,7 +9,7 @@ version = "0.1.0"
 description = "ChainRules-compatible differentiable coordinate scoring sidecar for AutoDock Vina"
 readme = "README.md"
 requires-python = ">=3.10"
-dependencies = ["chainrules==0.1.0"]
+dependencies = []
 license = {text = "Apache-2.0"}
 authors = [{name = "AutoDock-Vina AD contributors"}]
 

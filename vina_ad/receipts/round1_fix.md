@@ -13,8 +13,8 @@ Commands and observed totals:
 | `python -m pytest -q` | 11 passed, 0 failed | 0 |
 | `pytest -q -p no:cacheprovider tests` | 11 passed, 0 failed | 0 |
 | `python -m pip install --no-deps --target /tmp/vina_ad_review_install2 .` | wheel built and installed | 0 |
+| fresh venv `pip install --no-build-isolation .` | installed self-contained fallback | 0 |
 | `PYTHONPATH=/tmp/vina_ad_review_install2 python -c 'import vina_ad; ...'` | version `0.1.0`, score `0.9821600089636336` | 0 |
-| fresh venv `pip install --no-deps --no-build-isolation .` | installed `vina-ad-0.1.0` | 0 |
 | fresh venv `python -m vina_ad.workflow` | score `0.269885566173`, gradient L2 `0.679126205494`, 3 atoms | 0 |
 
 Analytic-oracle maximum absolute error: below `1e-12`; central finite-difference
