@@ -1,9 +1,10 @@
-"""Continuous coordinate scoring replay and its explicit ChainRules rules.
+"""A faithful, restricted replay of AutoDock Vina's SF_VINA score.
 
-The function in this module is intentionally small and dependency-free.  It is
-the primal callable used by both rules; the derivative implementation only
-evaluates its analytic linearisation and never finite-differences production
-inputs.
+The upstream scorer is a C++ object hidden behind ``vina_wrapper``.  This
+module keeps the original callable as the primal source while exposing the
+source-level pair potentials for fixed atom types and pair topology.  The
+formula and constants are mapped in ``SPEC.md`` to ``scoring_function.h`` and
+``potentials.h`` in the immutable upstream snapshot.
 """
 
 from __future__ import annotations
@@ -14,13 +15,69 @@ from typing import Any
 
 from .protocol import NonDifferentiablePoint, UnsupportedWrt, ZERO, rules
 
-DEFAULT_WEIGHTS = (1.0, -0.5, 0.2)
+# Public Vina::set_vina_weights defaults (the seventh value is weight_rot).
+DEFAULT_VINA_WEIGHTS = (
+    -0.035579,
+    -0.005156,
+    0.840245,
+    -0.035069,
+    -0.587439,
+    50.0,
+    0.05846,
+)
+
+# X-Score atom-type radii copied from upstream/src/lib/atom_constants.h.
+_XS_RADII = (
+    1.9,
+    1.9,
+    1.8,
+    1.8,
+    1.8,
+    1.8,
+    1.7,
+    1.7,
+    1.7,
+    1.7,
+    2.0,
+    2.1,
+    1.5,
+    1.8,
+    2.0,
+    2.2,
+    2.2,
+    2.3,
+    1.2,
+    1.9,
+    1.9,
+    1.9,
+    1.9,
+    1.9,
+    1.9,
+    1.9,
+    1.9,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+)
+_XS_TYPE_SIZE = len(_XS_RADII)
+_HYDROPHOBIC_TYPES = frozenset((0, 12, 13, 14, 15))
+_DONOR_TYPES = frozenset((3, 5, 7, 9, 18))
+_ACCEPTOR_TYPES = frozenset((4, 5, 8, 9))
+_GLUE_TYPES = frozenset((21, 24, 27, 30))
+_GLUED_CARBON_TYPES = frozenset((19, 20, 22, 23, 25, 26, 28, 29))
+_GLUE_PARTNERS = {
+    21: frozenset((19, 20)),
+    24: frozenset((22, 23)),
+    27: frozenset((25, 26)),
+    30: frozenset((28, 29)),
+}
 
 
-def _rows(coordinates: Any) -> tuple[list[list[float]], str]:
-    """Validate coordinates and return rows plus a representation hint."""
+def _rows(coordinates: Any, *, tangent: bool = False) -> tuple[list[list[float]], str]:
+    """Validate a coordinate array and return rows plus its representation."""
     if isinstance(coordinates, (str, bytes)) or not isinstance(coordinates, Sequence):
-        # numpy arrays are not Sequence on all supported Python versions.
         try:
             coordinates = coordinates.tolist()
         except AttributeError as exc:
@@ -29,8 +86,8 @@ def _rows(coordinates: Any) -> tuple[list[list[float]], str]:
         raw = list(coordinates)
     except TypeError as exc:
         raise TypeError("coordinates must be a numeric (N, 3) sequence") from exc
-    if len(raw) < 2:
-        raise ValueError("coordinates must contain at least two points")
+    if len(raw) < 2 and not tangent:
+        raise ValueError("coordinates must contain at least two atoms")
     out: list[list[float]] = []
     for row in raw:
         if isinstance(row, (str, bytes)):
@@ -57,16 +114,37 @@ def _rows(coordinates: Any) -> tuple[list[list[float]], str]:
     return out, kind
 
 
-def _weights(weights: Any) -> tuple[float, float, float]:
+def _atom_types(atom_types: Any, n_atoms: int) -> tuple[int, ...]:
+    if atom_types is None:
+        raise TypeError("atom_types is required: pass one XS_TYPE value per atom")
+    if isinstance(atom_types, (str, bytes)):
+        raise TypeError("atom_types must be a length-N integer sequence")
+    try:
+        values = list(atom_types)
+    except TypeError as exc:
+        raise TypeError("atom_types must be a length-N integer sequence") from exc
+    if len(values) != n_atoms:
+        raise ValueError("atom_types must have one X-Score type per atom")
+    result: list[int] = []
+    for value in values:
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise TypeError("atom_types must contain integer XS_TYPE values")
+        if value < 0 or value >= _XS_TYPE_SIZE:
+            raise ValueError(f"atom type must be in [0, {_XS_TYPE_SIZE})")
+        result.append(value)
+    return tuple(result)
+
+
+def _weights(weights: Any) -> tuple[float, ...]:
     if isinstance(weights, (str, bytes)):
-        raise TypeError("weights must be a length-3 real sequence")
+        raise TypeError("weights must be a length-7 real sequence")
     try:
         values = list(weights)
     except TypeError as exc:
-        raise TypeError("weights must be a length-3 real sequence") from exc
-    if len(values) != 3:
-        raise ValueError("weights must have length 3")
-    result = []
+        raise TypeError("weights must be a length-7 real sequence") from exc
+    if len(values) != 7:
+        raise ValueError("weights must have length 7 (the SF_VINA coefficients)")
+    result: list[float] = []
     for value in values:
         if isinstance(value, bool):
             raise TypeError("weights must contain real numbers")
@@ -77,47 +155,169 @@ def _weights(weights: Any) -> tuple[float, float, float]:
         if not math.isfinite(number):
             raise ValueError("weights must be finite")
         result.append(number)
-    return result[0], result[1], result[2]
+    return tuple(result)
 
 
-def _pair_linearisation(rows: list[list[float]], weights: tuple[float, float, float],
-                        tangent: list[list[float]] | None = None) -> tuple[float, list[list[float]]]:
-    """Return score and (optionally) coordinate directional derivative.
+def _pairs(pairs: Any, n_atoms: int) -> tuple[tuple[int, int], ...]:
+    if pairs is None:
+        return tuple((i, j) for i in range(n_atoms - 1) for j in range(i + 1, n_atoms))
+    if isinstance(pairs, (str, bytes)):
+        raise TypeError("pairs must be a sequence of (i, j) index pairs")
+    try:
+        raw_pairs = list(pairs)
+    except TypeError as exc:
+        raise TypeError("pairs must be a sequence of (i, j) index pairs") from exc
+    result: list[tuple[int, int]] = []
+    for pair in raw_pairs:
+        try:
+            values = list(pair)
+        except TypeError as exc:
+            raise TypeError("each pair must contain two atom indices") from exc
+        if len(values) != 2 or any(isinstance(v, bool) or not isinstance(v, int) for v in values):
+            raise TypeError("each pair must contain two atom indices")
+        i, j = values
+        if i < 0 or j < 0 or i >= n_atoms or j >= n_atoms or i == j:
+            raise ValueError("pair indices must be distinct and in range")
+        result.append((i, j))
+    return tuple(result)
 
-    The second return value is a coordinate-shaped gradient when ``tangent`` is
-    None, and a one-row ``[[directional_value]]`` result otherwise.  Keeping
-    this one shared kernel makes JVP and VJP use the same mathematical mapping.
+
+def _torsion_count(value: Any) -> float:
+    if isinstance(value, bool):
+        raise TypeError("torsion_count must be a finite non-negative real")
+    try:
+        result = float(value)
+    except (TypeError, ValueError) as exc:
+        raise TypeError("torsion_count must be a finite non-negative real") from exc
+    if not math.isfinite(result) or result < 0:
+        raise ValueError("torsion_count must be a finite non-negative real")
+    return result
+
+
+def _optimal_distance(type_i: int, type_j: int) -> float:
+    if type_i in _GLUE_TYPES or type_j in _GLUE_TYPES:
+        return 0.0
+    return _XS_RADII[type_i] + _XS_RADII[type_j]
+
+
+def _is_glued(type_i: int, type_j: int) -> bool:
+    # is_glued in upstream/potentials.h pairs a closure glue type with its
+    # matching C_H_CG* or C_P_CG* type.
+    return type_j in _GLUE_PARTNERS.get(type_i, ()) or type_i in _GLUE_PARTNERS.get(type_j, ())
+
+
+def _slope_step(bad: float, good: float, x: float) -> tuple[float, float]:
+    if bad < good:
+        if x <= bad or x >= good:
+            return (0.0 if x <= bad else 1.0), 0.0
+    else:
+        if x >= bad or x <= good:
+            return (0.0 if x >= bad else 1.0), 0.0
+    return (x - bad) / (good - bad), 1.0 / (good - bad)
+
+
+def _pair_terms(type_i: int, type_j: int, radius: float) -> tuple[tuple[float, ...], tuple[float, ...]]:
+    """Return six SF_VINA term values and d(term)/d(radius)."""
+    # Potential cutoffs and active piecewise knots have no unique derivative.
+    # Report them instead of silently selecting one-sided slopes.
+    if math.isclose(radius, 8.0, rel_tol=0.0, abs_tol=1e-14):
+        raise NonDifferentiablePoint("8 A SF_VINA potential cutoff is non-differentiable")
+    optimal = _optimal_distance(type_i, type_j)
+    delta = radius - optimal
+    if radius < 8.0:
+        if abs(delta) <= 1e-14:
+            raise NonDifferentiablePoint("repulsion knot is non-differentiable")
+        if type_i in _HYDROPHOBIC_TYPES and type_j in _HYDROPHOBIC_TYPES:
+            if min(abs(delta - 0.5), abs(delta - 1.5)) <= 1e-14:
+                raise NonDifferentiablePoint("hydrophobic slope-step knot is non-differentiable")
+        donor_acceptor = (type_i in _DONOR_TYPES and type_j in _ACCEPTOR_TYPES) or (
+            type_j in _DONOR_TYPES and type_i in _ACCEPTOR_TYPES
+        )
+        if donor_acceptor and min(abs(delta), abs(delta + 0.7)) <= 1e-14:
+            raise NonDifferentiablePoint("hydrogen-bond slope-step knot is non-differentiable")
+    if math.isclose(radius, 20.0, rel_tol=0.0, abs_tol=1e-14) and _is_glued(type_i, type_j):
+        raise NonDifferentiablePoint("20 A macrocycle glue cutoff is non-differentiable")
+    if radius >= 20.0:
+        return (0.0,) * 6, (0.0,) * 6
+    values = [0.0] * 6
+    derivatives = [0.0] * 6
+    if radius < 8.0:
+        for index, (offset, width) in enumerate(((0.0, 0.5), (3.0, 2.0))):
+            displacement = delta - offset
+            value = math.exp(-((displacement / width) ** 2))
+            values[index] = value
+            derivatives[index] = -2.0 * displacement * value / (width * width)
+        if delta <= 0.0:
+            values[2] = delta * delta
+            derivatives[2] = 2.0 * delta
+        if type_i in _HYDROPHOBIC_TYPES and type_j in _HYDROPHOBIC_TYPES:
+            values[3], derivatives[3] = _slope_step(1.5, 0.5, delta)
+        donor_acceptor = (type_i in _DONOR_TYPES and type_j in _ACCEPTOR_TYPES) or (
+            type_j in _DONOR_TYPES and type_i in _ACCEPTOR_TYPES
+        )
+        if donor_acceptor:
+            values[4], derivatives[4] = _slope_step(0.0, -0.7, delta)
+    if _is_glued(type_i, type_j):
+        values[5] = radius
+        derivatives[5] = 1.0
+    return tuple(values), tuple(derivatives)
+
+
+def _linearisation(
+    rows: list[list[float]],
+    atom_types: tuple[int, ...],
+    pairs: tuple[tuple[int, int], ...],
+    weights: tuple[float, ...],
+    torsion_count: float,
+) -> tuple[float, list[list[float]], tuple[float, ...]]:
+    pair_energy = 0.0
+    pair_gradient = [[0.0, 0.0, 0.0] for _ in rows]
+    term_sums = [0.0] * 6
+    for i, j in pairs:
+        delta_xyz = [rows[i][k] - rows[j][k] for k in range(3)]
+        radius_squared = sum(component * component for component in delta_xyz)
+        if radius_squared == 0.0:
+            raise NonDifferentiablePoint("coincident atom coordinates have no finite derivative")
+        radius = math.sqrt(radius_squared)
+        terms, derivatives = _pair_terms(atom_types[i], atom_types[j], radius)
+        pair_energy += sum(weights[k] * terms[k] for k in range(6))
+        term_sums = [term_sums[k] + terms[k] for k in range(6)]
+        radial_derivative = sum(weights[k] * derivatives[k] for k in range(6))
+        if radial_derivative:
+            for k, component in enumerate(delta_xyz):
+                force = radial_derivative * component / radius
+                pair_gradient[i][k] += force
+                pair_gradient[j][k] -= force
+    denominator = 1.0 + weights[6] * torsion_count
+    if denominator <= 0.0:
+        raise ValueError("1 + weight_rot*torsion_count must be positive")
+    score = pair_energy / denominator
+    coordinate_gradient = [[component / denominator for component in row] for row in pair_gradient]
+    weight_gradient = tuple(term / denominator for term in term_sums) + (
+        -pair_energy * torsion_count / (denominator * denominator),
+    )
+    return score, coordinate_gradient, weight_gradient
+
+
+def score_coordinates(
+    coordinates: Any,
+    atom_types: Any = None,
+    *,
+    pairs: Any = None,
+    weights: Any = DEFAULT_VINA_WEIGHTS,
+    torsion_count: Any = 0.0,
+) -> float:
+    """Return restricted SF_VINA pair energy for fixed molecular state.
+
+    ``atom_types``, ``pairs`` and ``torsion_count`` are fixed state inputs;
+    ``coordinates`` and ``weights`` are the active differentiable inputs.
     """
-    score = 0.0
-    gradient = [[0.0, 0.0, 0.0] for _ in rows]
-    w0, w1, w2 = weights
-    for i in range(len(rows) - 1):
-        for j in range(i + 1, len(rows)):
-            delta = [rows[i][k] - rows[j][k] for k in range(3)]
-            r2 = sum(x * x for x in delta)
-            if r2 == 0.0:
-                raise NonDifferentiablePoint("coincident coordinates have no finite derivative")
-            r = math.sqrt(r2)
-            z0 = (r - 3.0) / 0.5
-            z1 = (r - 5.0) / 1.5
-            f0, f1, f2 = math.exp(-(z0 * z0)), math.exp(-(z1 * z1)), 1.0 / r
-            score += w0 * f0 + w1 * f1 + w2 * f2
-            d_dr = w0 * f0 * (-2.0 * (r - 3.0) / (0.5 * 0.5))
-            d_dr += w1 * f1 * (-2.0 * (r - 5.0) / (1.5 * 1.5)) - w2 / (r * r)
-            unit = [x / r for x in delta]
-            for k in range(3):
-                component = d_dr * unit[k]
-                gradient[i][k] += component
-                gradient[j][k] -= component
-    if tangent is None:
-        return score, gradient
-    return score, [[sum(gradient[i][k] * tangent[i][k] for k in range(3)) for i in range(len(rows))]]
-
-
-def score_coordinates(coordinates: Any, weights: Any = DEFAULT_WEIGHTS) -> float:
-    """Return the continuous pair-distance score for an ``(N, 3)`` pose."""
     rows, _ = _rows(coordinates)
-    return _pair_linearisation(rows, _weights(weights))[0]
+    types = _atom_types(atom_types, len(rows))
+    pair_indices = _pairs(pairs, len(rows))
+    coefficient_values = _weights(weights)
+    torsions = _torsion_count(torsion_count)
+    return _linearisation(rows, types, pair_indices, coefficient_values, torsions)[0]
 
 
 score = score_coordinates
@@ -125,11 +325,11 @@ energy = score_coordinates
 
 
 def _restore_gradient(original: Any, gradient: list[list[float]]) -> Any:
-    """Preserve common list/tuple/NumPy-array conventions for cotangents."""
     if isinstance(original, tuple):
         return tuple(tuple(row) for row in gradient)
     try:
-        import numpy as np  # optional convenience; not a runtime requirement
+        import numpy as np
+
         if hasattr(original, "shape"):
             return np.asarray(gradient, dtype=float).reshape(original.shape)
     except ImportError:
@@ -142,6 +342,7 @@ def _restore_vector(original: Any, values: tuple[float, ...]) -> Any:
         return tuple(values)
     try:
         import numpy as np
+
         if hasattr(original, "shape"):
             return np.asarray(values, dtype=float).reshape(original.shape)
     except ImportError:
@@ -149,69 +350,103 @@ def _restore_vector(original: Any, values: tuple[float, ...]) -> Any:
     return list(values)
 
 
+def _active_tangent(tangents: dict[str, Any], name: str) -> Any:
+    value = tangents.get(name, ZERO)
+    if value is not ZERO:
+        return value
+    return ZERO
+
+
 @rules.jvp_for(score_coordinates)
-def _score_coordinates_jvp(tangents: dict[str, Any], coordinates: Any,
-                           weights: Any = DEFAULT_WEIGHTS) -> tuple[float, Any]:
+def _score_coordinates_jvp(
+    tangents: dict[str, Any],
+    coordinates: Any,
+    atom_types: Any = None,
+    *,
+    pairs: Any = None,
+    weights: Any = DEFAULT_VINA_WEIGHTS,
+    torsion_count: Any = 0.0,
+) -> tuple[float, Any]:
     rows, _ = _rows(coordinates)
-    weight_values = _weights(weights)
-    # Always obtain the primal through the public callable.  The linearisation
-    # below supplies only derivative data; it is not an alternate primal API.
-    value = score_coordinates(coordinates, weights)
-    _, gradient = _pair_linearisation(rows, weight_values)
-    active_coordinates = tangents.get("coordinates", ZERO)
-    active_weights = tangents.get("weights", ZERO)
-    if active_coordinates is ZERO and active_weights is ZERO:
+    types = _atom_types(atom_types, len(rows))
+    pair_indices = _pairs(pairs, len(rows))
+    coefficient_values = _weights(weights)
+    torsions = _torsion_count(torsion_count)
+    value = score_coordinates(
+        coordinates,
+        atom_types,
+        pairs=pairs,
+        weights=weights,
+        torsion_count=torsion_count,
+    )
+    _, coordinate_gradient, weight_gradient = _linearisation(
+        rows, types, pair_indices, coefficient_values, torsions
+    )
+    unsupported = set(tangents) - {"coordinates", "weights"}
+    if unsupported:
+        raise UnsupportedWrt(score_coordinates, unsupported, supported={"coordinates", "weights"})
+    coordinate_tangent = _active_tangent(tangents, "coordinates")
+    weight_tangent = _active_tangent(tangents, "weights")
+    if coordinate_tangent is ZERO and weight_tangent is ZERO:
         return value, ZERO
     directional = 0.0
-    if active_coordinates is not ZERO:
-        tangent_rows, _ = _rows(active_coordinates)
+    if coordinate_tangent is not ZERO:
+        tangent_rows, _ = _rows(coordinate_tangent, tangent=True)
         if len(tangent_rows) != len(rows):
             raise ValueError("coordinates tangent must have shape (N, 3)")
-        directional += sum(gradient[i][k] * tangent_rows[i][k]
-                           for i in range(len(rows)) for k in range(3))
-    if active_weights is not ZERO:
-        dw = _weights(active_weights)
-        # Feature sums are exactly the partial derivatives wrt weights.
-        feature_sums = [0.0, 0.0, 0.0]
-        for i in range(len(rows) - 1):
-            for j in range(i + 1, len(rows)):
-                d = [rows[i][k] - rows[j][k] for k in range(3)]
-                r = math.sqrt(sum(x * x for x in d))
-                feature_sums[0] += math.exp(-((r - 3.0) / 0.5) ** 2)
-                feature_sums[1] += math.exp(-((r - 5.0) / 1.5) ** 2)
-                feature_sums[2] += 1.0 / r
-        directional += sum(feature_sums[k] * dw[k] for k in range(3))
+        directional += sum(
+            coordinate_gradient[i][k] * tangent_rows[i][k]
+            for i in range(len(rows))
+            for k in range(3)
+        )
+    if weight_tangent is not ZERO:
+        tangent_weights = _weights(weight_tangent)
+        directional += sum(weight_gradient[k] * tangent_weights[k] for k in range(7))
     return value, directional
 
 
 @rules.vjp_for(score_coordinates)
-def _score_coordinates_vjp(wrt: tuple[str, ...], coordinates: Any,
-                           weights: Any = DEFAULT_WEIGHTS) -> tuple[float, Any]:
+def _score_coordinates_vjp(
+    wrt: tuple[str, ...],
+    coordinates: Any,
+    atom_types: Any = None,
+    *,
+    pairs: Any = None,
+    weights: Any = DEFAULT_VINA_WEIGHTS,
+    torsion_count: Any = 0.0,
+) -> tuple[float, Any]:
     supported = {"coordinates", "weights"}
     unsupported = set(wrt) - supported
     if unsupported:
         raise UnsupportedWrt(score_coordinates, unsupported, supported=supported)
     rows, _ = _rows(coordinates)
-    weight_values = _weights(weights)
-    # Preserve the original callable as the sole primal source.
-    value = score_coordinates(coordinates, weights)
-    _, coordinate_gradient = _pair_linearisation(rows, weight_values)
-    feature_sums = [0.0, 0.0, 0.0]
-    for i in range(len(rows) - 1):
-        for j in range(i + 1, len(rows)):
-            r = math.sqrt(sum((rows[i][k] - rows[j][k]) ** 2 for k in range(3)))
-            feature_sums[0] += math.exp(-((r - 3.0) / 0.5) ** 2)
-            feature_sums[1] += math.exp(-((r - 5.0) / 1.5) ** 2)
-            feature_sums[2] += 1.0 / r
+    types = _atom_types(atom_types, len(rows))
+    pair_indices = _pairs(pairs, len(rows))
+    coefficient_values = _weights(weights)
+    torsions = _torsion_count(torsion_count)
+    value = score_coordinates(
+        coordinates,
+        atom_types,
+        pairs=pairs,
+        weights=weights,
+        torsion_count=torsion_count,
+    )
+    _, coordinate_gradient, weight_gradient = _linearisation(
+        rows, types, pair_indices, coefficient_values, torsions
+    )
 
     def pullback(cotangent: Any) -> dict[str, Any]:
-        result: dict[str, Any] = {}
         factor = float(cotangent)
+        result: dict[str, Any] = {}
         if "coordinates" in wrt:
-            result["coordinates"] = _restore_gradient(coordinates,
-                                                        [[factor * x for x in row]
-                                                         for row in coordinate_gradient])
+            result["coordinates"] = _restore_gradient(
+                coordinates,
+                [[factor * component for component in row] for row in coordinate_gradient],
+            )
         if "weights" in wrt:
-            result["weights"] = _restore_vector(weights, tuple(factor * x for x in feature_sums))
+            result["weights"] = _restore_vector(
+                weights, tuple(factor * component for component in weight_gradient)
+            )
         return result
+
     return value, pullback

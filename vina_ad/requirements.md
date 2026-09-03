@@ -12,8 +12,9 @@
   public API usable; when present, the real ChainRules registry is used.
   `numpy` is optional; pure Python sequences are supported.
 - Supported runtime: CPython 3.10-3.12, Linux/macOS/Windows, IEEE-754 real
-  floating point. The compiled upstream `vina_wrapper` is not required for the
-  sidecar workflow.
+  floating point. The restricted sidecar kernel does not require the compiled
+  upstream `vina_wrapper`; the sourced official docking workflow does and is
+  explicitly reported as deferred when that extension is absent.
 - Evidence bindings: implementation `vina_ad/core.py`; public exports
   `vina_ad/__init__.py`; workflow `vina_ad/workflow.py`; tests `tests/`;
   command totals and environment are in

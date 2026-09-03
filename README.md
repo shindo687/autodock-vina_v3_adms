@@ -1,25 +1,31 @@
 # vina-ad
 
 `vina-ad` is a separately installable sidecar for AutoDock Vina. It exposes an
-explicit ChainRules-compatible API for a continuous coordinate scoring kernel:
-`vina_ad.score_coordinates` (aliases: `score`, `energy`) and the wrappers
-`jvp`, `vjp`, `grad`, and `value_and_grad`.
+explicit ChainRules-compatible API for a restricted, atom-typed `SF_VINA`
+coordinate pair kernel: `vina_ad.score_coordinates` (aliases: `score`,
+`energy`) and the wrappers `jvp`, `vjp`, `grad`, and `value_and_grad`.
 
 ```python
 import vina_ad
 coordinates = [[0., 0., 0.], [3., 0., 0.], [0., 4., 0.]]
+atom_types = [0, 0, 0]  # XS_TYPE_C_H values from upstream atom_constants.h
 value, tangent = vina_ad.jvp(
     vina_ad.score_coordinates, coordinates,
+    atom_types,
     tangents={"coordinates": [[1., 0., 0.], [0., 0., 0.], [0., 0., 0.]]},
 )
 value, gradients = vina_ad.value_and_grad(
-    vina_ad.score_coordinates, coordinates, wrt="coordinates"
+    vina_ad.score_coordinates, coordinates, atom_types, wrt="coordinates"
 )
 ```
 
-The kernel is a documented Python replay of three smooth pair-distance
-features. It is usable without the compiled upstream `vina_wrapper`; it does
-not claim to differentiate the complete C++ docking/search engine. See
-`SPEC.md`, `api_inventory.json`, and `vina_ad/requirements.md` for provenance,
-scope, and the complete support table. Run the representative workflow with
-`python -m vina_ad.workflow`.
+The kernel maps Vina's two Gaussians, repulsion, hydrophobic, hydrogen-bond,
+macrocycle glue, seven public weights, 8/20 A cutoffs, and torsion correction
+from the immutable upstream source. Atom types, fixed interacting pairs, and
+torsion count are state inputs; only coordinates and weights are active. It is
+usable without the compiled upstream `vina_wrapper` and does not claim to
+differentiate the complete C++ docking/search engine. See `SPEC.md`,
+`api_inventory.json`, and `vina_ad/requirements.md` for provenance, scope, and
+the complete support table. `python -m vina_ad.workflow` runs the sourced
+workflow when a real binding and PDBQT files are available, otherwise reports
+the capability as deferred; the labelled `run_demo` is only a toy diagnostic.

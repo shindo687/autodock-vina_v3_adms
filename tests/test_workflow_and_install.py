@@ -4,14 +4,22 @@ import subprocess
 import sys
 
 import vina_ad
-from vina_ad.workflow import run_demo
+from vina_ad.workflow import run_demo, run_official_workflow
 
 
 def test_representative_workflow_quantitative():
     result = run_demo()
+    assert result["status"] == "toy-diagnostic"
     assert result["n_atoms"] == 3.0
-    assert result["score"] == vina_ad.score_coordinates(((0., 0., 0.), (3., 0., 0.), (0., 4., 0.)))
+    assert result["score"] == vina_ad.score_coordinates(((0., 0., 0.), (3., 0., 0.), (0., 4., 0.)), (0, 0, 0))
     assert result["gradient_l2"] > 0
+
+
+def test_official_workflow_is_explicitly_quantified_or_deferred():
+    result = run_official_workflow()
+    assert result["status"] in {"completed", "deferred"}
+    if result["status"] == "completed":
+        assert result["absolute_deviation"] <= result["deviation_bound"]
 
 
 def test_inventory_is_complete_and_valid():
@@ -22,4 +30,4 @@ def test_inventory_is_complete_and_valid():
 
 def test_module_workflow_entrypoint():
     proc = subprocess.run([sys.executable, "-m", "vina_ad.workflow"], check=True, capture_output=True, text=True)
-    assert "score=" in proc.stdout and "gradient_l2=" in proc.stdout
+    assert "status=" in proc.stdout
