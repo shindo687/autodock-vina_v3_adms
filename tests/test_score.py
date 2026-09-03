@@ -109,6 +109,7 @@ def test_errors_and_fallback_contract():
         vina_ad.score_coordinates(((0, 0), (1, 1, 1)), (0, 0))
     with pytest.raises(ValueError, match="finite"):
         vina_ad.score_coordinates(((0, 0, 0), (math.inf, 0, 0)), (0, 0))
+    assert math.isfinite(vina_ad.score_coordinates(((0, 0, 0), (0, 0, 0)), (0, 0)))
     with pytest.raises(vina_ad.NonDifferentiablePoint):
         vina_ad.grad(vina_ad.score_coordinates, ((0, 0, 0), (0, 0, 0)), (0, 0), wrt="coordinates")
     with pytest.raises(TypeError, match="Unknown tangent"):

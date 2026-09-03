@@ -285,7 +285,7 @@ def _linearisation(
     for i, j in pairs:
         delta_xyz = [rows[i][k] - rows[j][k] for k in range(3)]
         radius_squared = sum(component * component for component in delta_xyz)
-        if radius_squared == 0.0:
+        if radius_squared == 0.0 and differentiate:
             raise NonDifferentiablePoint("coincident atom coordinates have no finite derivative")
         radius = math.sqrt(radius_squared)
         terms, derivatives = _pair_terms(
@@ -294,7 +294,7 @@ def _linearisation(
         pair_energy += sum(weights[k] * terms[k] for k in range(6))
         term_sums = [term_sums[k] + terms[k] for k in range(6)]
         radial_derivative = sum(weights[k] * derivatives[k] for k in range(6))
-        if radial_derivative:
+        if radial_derivative and radius_squared:
             for k, component in enumerate(delta_xyz):
                 force = radial_derivative * component / radius
                 pair_gradient[i][k] += force
