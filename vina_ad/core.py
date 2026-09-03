@@ -242,21 +242,26 @@ def _pair_terms(type_i: int, type_j: int, radius: float) -> tuple[tuple[float, .
     values = [0.0] * 6
     derivatives = [0.0] * 6
     if radius < 8.0:
+        # vina_gaussian(0, 0.5, 8) and vina_gaussian(3, 2.0, 8)
         for index, (offset, width) in enumerate(((0.0, 0.5), (3.0, 2.0))):
             displacement = delta - offset
             value = math.exp(-((displacement / width) ** 2))
             values[index] = value
             derivatives[index] = -2.0 * displacement * value / (width * width)
+        # vina_repulsion(0, 8)
         if delta <= 0.0:
             values[2] = delta * delta
             derivatives[2] = 2.0 * delta
+        # vina_hydrophobic(0.5, 1.5, 8)
         if type_i in _HYDROPHOBIC_TYPES and type_j in _HYDROPHOBIC_TYPES:
             values[3], derivatives[3] = _slope_step(1.5, 0.5, delta)
         donor_acceptor = (type_i in _DONOR_TYPES and type_j in _ACCEPTOR_TYPES) or (
             type_j in _DONOR_TYPES and type_i in _ACCEPTOR_TYPES
         )
+        # vina_non_dir_h_bond(-0.7, 0, 8)
         if donor_acceptor:
             values[4], derivatives[4] = _slope_step(0.0, -0.7, delta)
+    # linearattraction(20)
     if _is_glued(type_i, type_j):
         values[5] = radius
         derivatives[5] = 1.0
