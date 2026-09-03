@@ -12,6 +12,7 @@
   "sidecar_api": {
     "vina_ad.score_coordinates": {
       "status": "implemented",
+      "reason": "faithful restricted SF_VINA pair replay; full Vina.score remains deferred",
       "primal": "restricted SF_VINA pair energy for (N,3) coordinates, XS atom types, fixed pairs and torsion count",
       "differentiable_inputs": ["coordinates", "weights"],
       "fixed_inputs": ["atom_types", "pairs", "torsion_count"],
@@ -24,6 +25,7 @@
     },
     "vina_ad.score": {
       "status": "implemented_alias",
+      "reason": "alias of the restricted SF_VINA replay",
       "alias_of": "vina_ad.score_coordinates",
       "primal": "same restricted SF_VINA pair energy",
       "differentiable_inputs": ["coordinates", "weights"],
@@ -36,6 +38,7 @@
     },
     "vina_ad.energy": {
       "status": "implemented_alias",
+      "reason": "alias of the restricted SF_VINA replay",
       "alias_of": "vina_ad.score_coordinates",
       "primal": "same restricted SF_VINA pair energy",
       "differentiable_inputs": ["coordinates", "weights"],
