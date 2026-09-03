@@ -1,0 +1,29 @@
+parameter_file boron-silicon-atom_par.dat
+npts 40 40 40
+gridfld 1uw6_receptor.maps.fld
+spacing 0.375
+receptor_types HD C A N NA OA F P SA S Cl Br I Mg Ca Mn Fe Zn
+ligand_types HD C A N NA OA F P SA S Cl CL Br BR I Si B
+receptor 1uw6_receptor.pdbqt
+gridcenter 83.640 69.684 -10.124
+smooth 0.500
+map 1uw6_receptor.HD.map
+map 1uw6_receptor.C.map
+map 1uw6_receptor.A.map
+map 1uw6_receptor.N.map
+map 1uw6_receptor.NA.map
+map 1uw6_receptor.OA.map
+map 1uw6_receptor.F.map
+map 1uw6_receptor.P.map
+map 1uw6_receptor.SA.map
+map 1uw6_receptor.S.map
+map 1uw6_receptor.Cl.map
+map 1uw6_receptor.CL.map
+map 1uw6_receptor.Br.map
+map 1uw6_receptor.BR.map
+map 1uw6_receptor.I.map
+map 1uw6_receptor.Si.map
+map 1uw6_receptor.B.map
+elecmap 1uw6_receptor.e.map
+dsolvmap 1uw6_receptor.d.map
+dielectric -42.000
