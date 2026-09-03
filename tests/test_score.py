@@ -57,8 +57,9 @@ def test_typed_potentials_and_cutoff():
     # pair terms are zero at the official 8 A potential cutoff (except glue).
     value = vina_ad.score_coordinates(((0., 0., 0.), (4., 0., 0.)), (0, 0))
     assert math.isfinite(value)
+    assert vina_ad.score_coordinates(((0., 0., 0.), (8., 0., 0.)), (0, 0)) == 0.0
     with pytest.raises(vina_ad.NonDifferentiablePoint):
-        vina_ad.score_coordinates(((0., 0., 0.), (8., 0., 0.)), (0, 0))
+        vina_ad.grad(vina_ad.score_coordinates, ((0., 0., 0.), (8., 0., 0.)), (0, 0), wrt="coordinates")
     assert vina_ad.score_coordinates(((0., 0., 0.), (21., 0., 0.)), (0, 0)) == 0.0
     donor_acceptor = vina_ad.score_coordinates(((0., 0., 0.), (2., 0., 0.)), (3, 8))
     assert donor_acceptor != 0.0

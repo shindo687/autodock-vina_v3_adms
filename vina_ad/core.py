@@ -216,26 +216,28 @@ def _slope_step(bad: float, good: float, x: float) -> tuple[float, float]:
     return (x - bad) / (good - bad), 1.0 / (good - bad)
 
 
-def _pair_terms(type_i: int, type_j: int, radius: float) -> tuple[tuple[float, ...], tuple[float, ...]]:
+def _pair_terms(
+    type_i: int, type_j: int, radius: float, *, differentiate: bool = False
+) -> tuple[tuple[float, ...], tuple[float, ...]]:
     """Return six SF_VINA term values and d(term)/d(radius)."""
     # Potential cutoffs and active piecewise knots have no unique derivative.
     # Report them instead of silently selecting one-sided slopes.
-    if math.isclose(radius, 8.0, rel_tol=0.0, abs_tol=1e-14):
+    if differentiate and math.isclose(radius, 8.0, rel_tol=0.0, abs_tol=1e-14):
         raise NonDifferentiablePoint("8 A SF_VINA potential cutoff is non-differentiable")
     optimal = _optimal_distance(type_i, type_j)
     delta = radius - optimal
     if radius < 8.0:
-        if abs(delta) <= 1e-14:
+        if differentiate and abs(delta) <= 1e-14:
             raise NonDifferentiablePoint("repulsion knot is non-differentiable")
         if type_i in _HYDROPHOBIC_TYPES and type_j in _HYDROPHOBIC_TYPES:
-            if min(abs(delta - 0.5), abs(delta - 1.5)) <= 1e-14:
+            if differentiate and min(abs(delta - 0.5), abs(delta - 1.5)) <= 1e-14:
                 raise NonDifferentiablePoint("hydrophobic slope-step knot is non-differentiable")
         donor_acceptor = (type_i in _DONOR_TYPES and type_j in _ACCEPTOR_TYPES) or (
             type_j in _DONOR_TYPES and type_i in _ACCEPTOR_TYPES
         )
-        if donor_acceptor and min(abs(delta), abs(delta + 0.7)) <= 1e-14:
+        if differentiate and donor_acceptor and min(abs(delta), abs(delta + 0.7)) <= 1e-14:
             raise NonDifferentiablePoint("hydrogen-bond slope-step knot is non-differentiable")
-    if math.isclose(radius, 20.0, rel_tol=0.0, abs_tol=1e-14) and _is_glued(type_i, type_j):
+    if differentiate and math.isclose(radius, 20.0, rel_tol=0.0, abs_tol=1e-14) and _is_glued(type_i, type_j):
         raise NonDifferentiablePoint("20 A macrocycle glue cutoff is non-differentiable")
     if radius >= 20.0:
         return (0.0,) * 6, (0.0,) * 6
@@ -274,6 +276,8 @@ def _linearisation(
     pairs: tuple[tuple[int, int], ...],
     weights: tuple[float, ...],
     torsion_count: float,
+    *,
+    differentiate: bool = False,
 ) -> tuple[float, list[list[float]], tuple[float, ...]]:
     pair_energy = 0.0
     pair_gradient = [[0.0, 0.0, 0.0] for _ in rows]
@@ -284,7 +288,9 @@ def _linearisation(
         if radius_squared == 0.0:
             raise NonDifferentiablePoint("coincident atom coordinates have no finite derivative")
         radius = math.sqrt(radius_squared)
-        terms, derivatives = _pair_terms(atom_types[i], atom_types[j], radius)
+        terms, derivatives = _pair_terms(
+            atom_types[i], atom_types[j], radius, differentiate=differentiate
+        )
         pair_energy += sum(weights[k] * terms[k] for k in range(6))
         term_sums = [term_sums[k] + terms[k] for k in range(6)]
         radial_derivative = sum(weights[k] * derivatives[k] for k in range(6))
@@ -372,6 +378,9 @@ def _score_coordinates_jvp(
     weights: Any = DEFAULT_VINA_WEIGHTS,
     torsion_count: Any = 0.0,
 ) -> tuple[float, Any]:
+    unsupported = set(tangents) - {"coordinates", "weights"}
+    if unsupported:
+        raise UnsupportedWrt(score_coordinates, unsupported, supported={"coordinates", "weights"})
     rows, _ = _rows(coordinates)
     types = _atom_types(atom_types, len(rows))
     pair_indices = _pairs(pairs, len(rows))
@@ -385,11 +394,8 @@ def _score_coordinates_jvp(
         torsion_count=torsion_count,
     )
     _, coordinate_gradient, weight_gradient = _linearisation(
-        rows, types, pair_indices, coefficient_values, torsions
+        rows, types, pair_indices, coefficient_values, torsions, differentiate=True
     )
-    unsupported = set(tangents) - {"coordinates", "weights"}
-    if unsupported:
-        raise UnsupportedWrt(score_coordinates, unsupported, supported={"coordinates", "weights"})
     coordinate_tangent = _active_tangent(tangents, "coordinates")
     weight_tangent = _active_tangent(tangents, "weights")
     if coordinate_tangent is ZERO and weight_tangent is ZERO:
@@ -437,7 +443,7 @@ def _score_coordinates_vjp(
         torsion_count=torsion_count,
     )
     _, coordinate_gradient, weight_gradient = _linearisation(
-        rows, types, pair_indices, coefficient_values, torsions
+        rows, types, pair_indices, coefficient_values, torsions, differentiate=True
     )
 
     def pullback(cotangent: Any) -> dict[str, Any]:
