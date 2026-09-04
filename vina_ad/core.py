@@ -278,23 +278,45 @@ def _linearisation(
     torsion_count: float,
     *,
     differentiate: bool = False,
+    active: frozenset[str] | set[str] | None = None,
 ) -> tuple[float, list[list[float]], tuple[float, ...]]:
+    """Evaluate the shared primal linearisation for the requested actives.
+
+    ``active`` controls which derivative-only checks and calculations run.  In
+    particular, a weights-only rule needs the term sums but has no reason to
+    form radial coordinate forces (or reject coordinate singularities).  The
+    legacy ``differentiate`` switch is retained for the primal-independent
+    internal callers and means both active inputs when true.
+    """
+    if active is None:
+        active_coordinates = differentiate
+        active_weights = differentiate
+    else:
+        active_coordinates = "coordinates" in active
+        active_weights = "weights" in active
     pair_energy = 0.0
-    pair_gradient = [[0.0, 0.0, 0.0] for _ in rows]
-    term_sums = [0.0] * 6
+    pair_gradient = [[0.0, 0.0, 0.0] for _ in rows] if active_coordinates else None
+    term_sums = [0.0] * 6 if active_weights else None
     for i, j in pairs:
         delta_xyz = [rows[i][k] - rows[j][k] for k in range(3)]
         radius_squared = sum(component * component for component in delta_xyz)
-        if radius_squared == 0.0 and differentiate:
+        if radius_squared == 0.0 and active_coordinates:
             raise NonDifferentiablePoint("coincident atom coordinates have no finite derivative")
         radius = math.sqrt(radius_squared)
         terms, derivatives = _pair_terms(
-            atom_types[i], atom_types[j], radius, differentiate=differentiate
+            atom_types[i], atom_types[j], radius, differentiate=active_coordinates
         )
         pair_energy += sum(weights[k] * terms[k] for k in range(6))
-        term_sums = [term_sums[k] + terms[k] for k in range(6)]
-        radial_derivative = sum(weights[k] * derivatives[k] for k in range(6))
-        if radial_derivative and radius_squared:
+        if active_weights:
+            assert term_sums is not None
+            term_sums = [term_sums[k] + terms[k] for k in range(6)]
+        radial_derivative = (
+            sum(weights[k] * derivatives[k] for k in range(6))
+            if active_coordinates
+            else 0.0
+        )
+        if active_coordinates and radial_derivative and radius_squared:
+            assert pair_gradient is not None
             for k, component in enumerate(delta_xyz):
                 force = radial_derivative * component / radius
                 pair_gradient[i][k] += force
@@ -303,10 +325,18 @@ def _linearisation(
     if denominator <= 0.0:
         raise ValueError("1 + weight_rot*torsion_count must be positive")
     score = pair_energy / denominator
-    coordinate_gradient = [[component / denominator for component in row] for row in pair_gradient]
-    weight_gradient = tuple(term / denominator for term in term_sums) + (
-        -pair_energy * torsion_count / (denominator * denominator),
+    coordinate_gradient = (
+        [[component / denominator for component in row] for row in pair_gradient]
+        if active_coordinates
+        else []
     )
+    if active_weights:
+        assert term_sums is not None
+        weight_gradient = tuple(term / denominator for term in term_sums) + (
+            -pair_energy * torsion_count / (denominator * denominator),
+        )
+    else:
+        weight_gradient = ()
     return score, coordinate_gradient, weight_gradient
 
 
@@ -393,25 +423,34 @@ def _score_coordinates_jvp(
         weights=weights,
         torsion_count=torsion_count,
     )
-    _, coordinate_gradient, weight_gradient = _linearisation(
-        rows, types, pair_indices, coefficient_values, torsions, differentiate=True
-    )
     coordinate_tangent = _active_tangent(tangents, "coordinates")
     weight_tangent = _active_tangent(tangents, "weights")
     if coordinate_tangent is ZERO and weight_tangent is ZERO:
         return value, ZERO
-    directional = 0.0
+    tangent_rows = None
     if coordinate_tangent is not ZERO:
         tangent_rows, _ = _rows(coordinate_tangent, tangent=True)
         if len(tangent_rows) != len(rows):
             raise ValueError("coordinates tangent must have shape (N, 3)")
+    tangent_weights = None
+    if weight_tangent is not ZERO:
+        tangent_weights = _weights(weight_tangent)
+    active = frozenset(
+        name
+        for name, tangent in (("coordinates", coordinate_tangent), ("weights", weight_tangent))
+        if tangent is not ZERO
+    )
+    _, coordinate_gradient, weight_gradient = _linearisation(
+        rows, types, pair_indices, coefficient_values, torsions, active=active
+    )
+    directional = 0.0
+    if coordinate_tangent is not ZERO:
         directional += sum(
             coordinate_gradient[i][k] * tangent_rows[i][k]
             for i in range(len(rows))
             for k in range(3)
         )
     if weight_tangent is not ZERO:
-        tangent_weights = _weights(weight_tangent)
         directional += sum(weight_gradient[k] * tangent_weights[k] for k in range(7))
     return value, directional
 
@@ -443,7 +482,12 @@ def _score_coordinates_vjp(
         torsion_count=torsion_count,
     )
     _, coordinate_gradient, weight_gradient = _linearisation(
-        rows, types, pair_indices, coefficient_values, torsions, differentiate=True
+        rows,
+        types,
+        pair_indices,
+        coefficient_values,
+        torsions,
+        active=frozenset(wrt),
     )
 
     def pullback(cotangent: Any) -> dict[str, Any]:

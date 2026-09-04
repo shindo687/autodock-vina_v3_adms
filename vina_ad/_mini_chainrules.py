@@ -73,7 +73,7 @@ def _bind(function, args, kwargs):
 def _validate_names(signature, names, *, label):
     unknown = sorted(set(names) - set(signature.parameters))
     if unknown:
-        raise TypeError(f"Unknown {label} parameter name(s): {unknown!r}")
+        raise TypeError(f"Unknown {label} parameter names: {unknown!r}")
 
 
 def _names(wrt):
@@ -108,10 +108,11 @@ def jvp(function, *args, tangents, **kwargs):
 
 def vjp(function, *args, wrt, **kwargs):
     names = _names(wrt)
-    # ChainRules lets the registered rule classify unsupported active inputs;
-    # this preserves its contextual ``UnsupportedWrt`` error instead of
-    # converting it into a constructor/signature TypeError.
-    _bind(function, args, kwargs)
+    signature = _bind(function, args, kwargs)
+    # Match ChainRules 0.1.0: names that are absent from the callable
+    # signature are a protocol error and must fail before rule dispatch.
+    # Registered rules still classify valid-but-unsupported parameters below.
+    _validate_names(signature, names, label="wrt")
     entry = _VJP.get(id(function))
     if entry is None or entry[0] is not function:
         raise RuleNotFound(function, "VJP")
