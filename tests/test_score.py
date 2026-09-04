@@ -221,6 +221,9 @@ def test_weights_only_prunes_coordinate_nondifferentiability(coordinates):
     assert value == pytest.approx(vina_ad.score_coordinates(coordinates, TYPES), abs=1e-12)
     assert len(result["weights"]) == 7
     assert all(math.isfinite(component) for component in result["weights"])
+    if coordinates[1][0] == 8.0:
+        assert tangent == 0.0
+        assert result["weights"] == pytest.approx((0.0,) * 7, abs=0.0)
 
 
 def test_weight_derivative_and_aliases():
