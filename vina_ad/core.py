@@ -249,24 +249,33 @@ def _pair_terms(
             displacement = delta - offset
             value = math.exp(-((displacement / width) ** 2))
             values[index] = value
-            derivatives[index] = -2.0 * displacement * value / (width * width)
+            if differentiate:
+                derivatives[index] = -2.0 * displacement * value / (width * width)
         # vina_repulsion(0, 8)
         if delta <= 0.0:
             values[2] = delta * delta
-            derivatives[2] = 2.0 * delta
+            if differentiate:
+                derivatives[2] = 2.0 * delta
         # vina_hydrophobic(0.5, 1.5, 8)
         if type_i in _HYDROPHOBIC_TYPES and type_j in _HYDROPHOBIC_TYPES:
-            values[3], derivatives[3] = _slope_step(1.5, 0.5, delta)
+            slope_value, slope_derivative = _slope_step(1.5, 0.5, delta)
+            values[3] = slope_value
+            if differentiate:
+                derivatives[3] = slope_derivative
         donor_acceptor = (type_i in _DONOR_TYPES and type_j in _ACCEPTOR_TYPES) or (
             type_j in _DONOR_TYPES and type_i in _ACCEPTOR_TYPES
         )
         # vina_non_dir_h_bond(-0.7, 0, 8)
         if donor_acceptor:
-            values[4], derivatives[4] = _slope_step(0.0, -0.7, delta)
+            slope_value, slope_derivative = _slope_step(0.0, -0.7, delta)
+            values[4] = slope_value
+            if differentiate:
+                derivatives[4] = slope_derivative
     # linearattraction(20)
     if _is_glued(type_i, type_j):
         values[5] = radius
-        derivatives[5] = 1.0
+        if differentiate:
+            derivatives[5] = 1.0
     return tuple(values), tuple(derivatives)
 
 
