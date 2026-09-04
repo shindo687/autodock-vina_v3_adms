@@ -32,6 +32,8 @@ def test_official_workflow_runs_public_ad_on_sourced_example():
     assert result["receptor_atoms"] > 1000
     assert result["ligand_atoms"] > 10
     assert result["interaction_pairs"] == result["receptor_atoms"] * result["ligand_atoms"]
+    assert result["workflow_scale"]["interaction_pairs"] == result["interaction_pairs"]
+    assert result["iterations"]["ad_value_and_grad"] == 1.0
     assert result["ad_value_and_grad_evaluations"] == 1.0
     assert result["ad_jvp_evaluations"] == 1.0
     assert result["ad_coordinate_gradient_l2"] > 0.0

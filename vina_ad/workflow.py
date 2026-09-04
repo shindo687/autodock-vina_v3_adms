@@ -191,6 +191,18 @@ def run_official_workflow(
         "receptor_atoms": float(receptor_count),
         "ligand_atoms": float(len(ligand_coordinates)),
         "interaction_pairs": float(len(pairs)),
+        "workflow_scale": {
+            "receptor_atoms": float(receptor_count),
+            "ligand_atoms": float(len(ligand_coordinates)),
+            "interaction_pairs": float(len(pairs)),
+        },
+        "iterations": {
+            "vina_score": 1.0,
+            "vina_optimize": 1.0,
+            "ad_value_and_grad": 1.0,
+            "ad_jvp": 1.0,
+            "finite_difference": 2.0,
+        },
         "torsion_count": torsion_count,
         "ad_primal": ad_value,
         "jvp_primal": jvp_value,
