@@ -13,8 +13,11 @@
   `numpy` is optional; pure Python sequences are supported.
 - Supported runtime: CPython 3.10-3.12, Linux/macOS/Windows, IEEE-754 real
   floating point. The restricted sidecar kernel does not require the compiled
-  upstream `vina_wrapper`; the sourced official docking workflow does and is
-  explicitly reported as deferred when that extension is absent.
+  upstream `vina_wrapper`; the sourced official workflow additionally requires
+  an installed `vina` binding and explicit PDBQT paths when run outside this
+  checkout. It invokes real Vina scoring/one-step optimization plus public
+  sidecar `value_and_grad`/`jvp`; unavailable bindings or inputs are explicitly
+  reported as deferred.
 - Evidence bindings: implementation `vina_ad/core.py`; public exports
   `vina_ad/__init__.py`; workflow `vina_ad/workflow.py`; tests `tests/`;
   command totals and environment are in

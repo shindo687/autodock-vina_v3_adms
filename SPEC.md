@@ -48,21 +48,30 @@ sourced to `upstream/src/lib/scoring_function.h:48-59`,
 
 JVP/VJP/gradient rules are real-linear in coordinates and weights. Coincident
 radii, the 8/20 A cutoffs, and piecewise knots are reported as
-`NonDifferentiablePoint`. Invalid values and unsupported active inputs fail
-with contextual errors. Rules call the public primal and share one analytic
-pair linearisation.
+`NonDifferentiablePoint` only when coordinates are an active input. A
+weights-only JVP/VJP computes term-value derivatives without coordinate
+singularity checks. Invalid values and unsupported active inputs fail with
+contextual errors. Rules call the public primal and share one analytic pair
+linearisation, pruned by the requested active inputs.
 
 ## Oracle and workflow
 
 Tests compare independent source-formula transcription to `ScoringFunction`
 values (absolute error <= `1e-12`) and run a real installed `vina.Vina`
 Python binding on a sourced one-atom receptor/ligand PDBQT pair. The binding
-rounds to three decimals and interpolates maps; the restricted pair replay is
-required to agree within `0.05` kcal/mol. The official
-`upstream/example/python_scripting/first_example.py` is run and its missing
-`vina.vina_wrapper` failure is recorded as deferred. `run_official_workflow`
-reports that status for the multi-atom source files rather than claiming full
-grid-score parity.
+rounds to three decimals and interpolates maps; that one-atom restricted pair
+oracle agrees within `0.05` kcal/mol. Every exposed AD entry point has an
+executed finite-difference or analytic oracle: JVP and VJP are checked in both
+coordinate and weight directions, their real inner-product duality is asserted,
+and `grad`/`value_and_grad` are compared for both active inputs. Zero JVP
+directions and zero VJP cotangents are also checked. The official
+`upstream/example/python_scripting/first_example.py` source files are run with
+the installed real binding, and `run_official_workflow` invokes public
+`value_and_grad` and `jvp` on all sourced receptor/ligand cross pairs. It
+reports the real Vina score, restricted primal, gradient norms, directional
+finite-difference error, duality error, pair count, and remaining full-grid /
+search coverage; the two primal values are intentionally not treated as the
+same model for multi-atom inputs.
 
 ## Complete API inventory and decisions
 

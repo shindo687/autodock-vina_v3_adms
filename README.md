@@ -27,5 +27,15 @@ usable without the compiled upstream `vina_wrapper` and does not claim to
 differentiate the complete C++ docking/search engine. See `SPEC.md`,
 `api_inventory.json`, and `vina_ad/requirements.md` for provenance, scope, and
 the complete support table. `python -m vina_ad.workflow` runs the sourced
-workflow when a real binding and PDBQT files are available, otherwise reports
-the capability as deferred; the labelled `run_demo` is only a toy diagnostic.
+workflow, including public `value_and_grad`/`jvp` calls and quantitative
+primal/derivative metrics, when a real binding and PDBQT files are available.
+In an installed environment pass the source inputs explicitly:
+
+```bash
+python -m vina_ad.workflow \
+  --receptor /path/to/1iep_receptor.pdbqt \
+  --ligand /path/to/1iep_ligand.pdbqt
+```
+
+If the real binding or inputs are unavailable it reports the capability as
+deferred; the labelled `run_demo` is only a toy diagnostic.
